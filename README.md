@@ -110,9 +110,21 @@ the sweep you didn't want.
 
 ### 2. Slice
 
-Import all the STLs **as separate objects**, not merged into one. They arrive
-pre-arranged; positions are baked in, so no auto-arrange is needed and the
-gradient reads in order across the plate.
+Import all the STLs **as separate objects**, not merged into one. Merging them
+gives you a single object with one name, and the post-processor has nothing to
+key on.
+
+Each STL carries its own grid position, but be aware that **most slicers
+discard it**: OrcaSlicer auto-arranges on import (Preferences → `auto_arrange`)
+and will stack or re-pack them regardless. In practice you will probably
+separate and arrange them by hand.
+
+Arrange them in **index order** — `01` at back-left, reading left-to-right then
+forward. That is what the two-digit filename prefix is for: the files sort into
+sweep order, so you can lay them out without cross-referencing values. A sorted
+plate lets you see the transition at a glance; a scrambled one means reading
+nine labels and sorting them mentally. Either works — the engraving is
+authoritative — but only one of them is quick.
 
 Enable **Exclude objects**, and add the post-processor under
 *Print Settings → Others → Post-processing Scripts*:
