@@ -8,6 +8,29 @@ is applied automatically per object, mid-print, from the sliced G-code. The
 number on the part is the number the printer used — they come from one source
 and cannot disagree.
 
+![Nine printed frames in a 3×3 grid, each engraved with the Z offset it was printed at, running from +0.050 at the back to +0.074 at the front](docs/plate.jpg)
+
+*A finished sweep, +0.050 (back left) to +0.074 (front right) in 0.003 steps.
+The gradient is visible without reading a single label: the back row's
+extrusion lines have merged into a solid glossy surface, while by the front row
+the individual lines are separated by visible gaps.*
+
+## A real result
+
+On an Elegoo Centauri Carbon with a load-cell probe, running OpenCentauri
+COSMOS (Kalico), immediately after a full calibration:
+
+- A coarse read suggested +0.040 was close but slightly tight.
+- One 9-frame sweep, **+0.074 → +0.050 in 0.003 steps**, resolved it to
+  **+0.056** — the first frame where the lines had fully merged without the
+  surface starting to look over-pressed.
+- Total cost: one 50-minute unattended print.
+
+0.003 mm steps proved fine enough to distinguish adjacent frames by eye on this
+machine, and 0.024 mm of total span was enough to cross the transition. Those
+are reasonable starting numbers if you already know roughly where you are; open
+the span up and coarsen the step if you don't.
+
 ## Why
 
 The usual way to find a Z offset is to start a print, watch the first layer,
