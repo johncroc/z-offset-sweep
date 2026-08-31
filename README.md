@@ -31,6 +31,24 @@ machine, and 0.024 mm of total span was enough to cross the transition. Those
 are reasonable starting numbers if you already know roughly where you are; open
 the span up and coarsen the step if you don't.
 
+### Two machines, two answers
+
+The same procedure was then run on a second, identical Centauri Carbon —
+different COSMOS release, freshly calibrated:
+
+| machine | Z offset found | `position_endstop` |
+|---|---|---|
+| printer A | **+0.056** | 6.140 |
+| printer B | **+0.030** | 4.496 |
+
+Both needed the nozzle **raised** from calibrated zero, so the direction
+replicated. The magnitude did not: they differ by 0.026 mm, roughly nine steps
+of a fine sweep, on machines whose raw endstop positions differ by 1.6 mm.
+
+Take that as a prior for choosing where to sweep — start on the positive side of
+zero — and not as a number to copy. A value borrowed from another machine, even
+the same model on the same firmware, is a guess wearing three decimal places.
+
 ## Why
 
 The usual way to find a Z offset is to start a print, watch the first layer,
