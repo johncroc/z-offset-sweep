@@ -1,0 +1,20 @@
+# FreeCAD
+*.FCStd1
+*.FCBak
+*.FCStd.lock
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*~
+*.swp
+
+# Local artifacts
+*.bak
+*.orig
+*.gcode

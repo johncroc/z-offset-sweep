@@ -1,0 +1,180 @@
+# -*- coding: utf-8 -*-
+"""
+ZOffsetSweep - generate the Z-offset calibration frames in one pass.
+
+Reads the sweep from the Params sheet of z-offset-test-tab.FCStd and walks
+z_start -> z_end across n_frames. z_end may be BELOW z_start, which produces a
+descending sweep; the step is derived and reported so it can be checked against
+intent (e.g. +0.074 -> +0.050 over 9 frames = 0.003).
+
+For each step it writes the formatted value into Params.text (which drives
+ShapeString), recomputes, and exports the Body to STL.
+
+GRID PLACEMENT
+Each frame is exported at its own spot in a grid rather than all at the model
+origin. Exporting them all at the origin makes them import stacked on top of
+one another, forcing a manual separate-and-arrange step whose result depends on
+the slicer's packing heuristic - which is not guaranteed to preserve sweep
+order. Baking the position in means they import pre-arranged, and the layout is
+determined by the sweep itself. Frame 1 sits back-left, filling left-to-right
+then back-to-front, so reading order matches sweep order.
+
+Filenames carry two things:
+  - a two-digit index, so alphabetical sort matches sweep order.
+  - the signed offset, which is the contract shared with
+    ~/bash-scripts/zoffset-sweep-postprocess.py. That script parses the value
+    back out of the object name Orca emits, so the engraved label and the
+    applied offset come from one number and cannot drift apart.
+
+Every export is verified to contain real triangles. A binary STL with zero
+triangles is exactly 84 bytes and looks like a successful export - that failure
+mode has bitten this workflow before, so it raises here instead.
+"""
+
+import os
+import struct
+
+import FreeCAD as App
+import Mesh
+
+PREFIX = "Z-Offset-Test"
+STL_HEADER_BYTES = 84  # 80-byte header + 4-byte triangle count
+
+
+def resolve_out_dir(doc, sheet):
+    """Where to write STLs.
+
+    Uses the Params alias `out_dir` if present, else an `stl/` folder beside
+    the .FCStd. Keeping it document-relative means the macro works wherever
+    the repo is cloned, with no path to edit.
+    """
+    try:
+        configured = str(sheet.get("out_dir")).strip()
+        if configured:
+            return os.path.expanduser(configured)
+    except Exception:
+        pass
+    base = os.path.dirname(doc.FileName) if doc.FileName else os.path.expanduser("~")
+    return os.path.join(base, "stl")
+
+
+def triangle_count(path):
+    """Triangle count of a binary STL, or 0 if it holds no geometry."""
+    if os.path.getsize(path) < STL_HEADER_BYTES:
+        return 0
+    with open(path, "rb") as fh:
+        fh.seek(80)
+        return struct.unpack("<I", fh.read(4))[0]
+
+
+def label_for(value, decimals):
+    """Human-readable text engraved on the tab."""
+    if abs(value) < 10 ** -(decimals + 1):
+        return "%.*f" % (decimals, 0.0)
+    return "%s %.*f" % ("-" if value < 0 else "+", decimals, abs(value))
+
+
+def token_for(value, decimals):
+    """Filename token the post-processor parses back into a signed offset."""
+    return "%s-%.*f" % ("neg" if value < 0 else "pos", decimals, abs(value))
+
+
+def sheet_value(sheet, names, default=None):
+    """First alias that exists, so older sheets keep working."""
+    for name in names:
+        try:
+            return sheet.get(name)
+        except Exception:
+            continue
+    if default is None:
+        raise RuntimeError("none of these aliases exist in Params: %s" % (names,))
+    return default
+
+
+def run():
+    doc = App.ActiveDocument
+    if doc is None:
+        raise RuntimeError("no active document")
+
+    sheet = doc.getObject("Params")
+    body = doc.getObject("Body")
+    if sheet is None or body is None:
+        raise RuntimeError("expected 'Params' and 'Body' in %s" % doc.Label)
+
+    start = float(sheet_value(sheet, ("z_start", "z_min")))
+    end = float(sheet_value(sheet, ("z_end", "z_max")))
+    count = int(sheet.get("n_frames"))
+    decimals = int(sheet.get("z_decimals"))
+    cols = int(sheet_value(sheet, ("grid_cols",), 3))
+    gap = float(sheet_value(sheet, ("grid_gap",), 6.0))
+
+    if count < 2:
+        raise ValueError("n_frames must be at least 2, got %d" % count)
+    if abs(end - start) < 1e-12:
+        raise ValueError("z_start and z_end are the same value (%s)" % start)
+    if cols < 1:
+        raise ValueError("grid_cols must be at least 1, got %d" % cols)
+
+    out_dir = resolve_out_dir(doc, sheet)
+    if not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+
+    original_text = sheet.get("text")
+    original_placement = body.Placement
+
+    # Footprint measured at the original placement, before anything is moved.
+    bb = body.Shape.BoundBox
+    pitch_x, pitch_y = bb.XLength + gap, bb.YLength + gap
+
+    step = (end - start) / (count - 1)
+    width = max(2, len(str(count)))
+    written = []
+
+    try:
+        for i in range(count):
+            value = start + i * step
+            sheet.set("text", label_for(value, decimals))
+
+            # Frame 1 back-left; fill left-to-right, then forward (-Y).
+            col, row = i % cols, i // cols
+            placement = App.Placement(original_placement)
+            placement.Base = original_placement.Base + App.Vector(
+                col * pitch_x, -row * pitch_y, 0
+            )
+            body.Placement = placement
+            doc.recompute()
+
+            name = "%s-%0*d-%s.stl" % (
+                PREFIX, width, i + 1, token_for(value, decimals)
+            )
+            path = os.path.join(out_dir, name)
+            Mesh.export([body], path)
+
+            tris = triangle_count(path)
+            if tris == 0:
+                raise RuntimeError(
+                    "%s exported with zero triangles - the body did not "
+                    "recompute. Nothing further was written." % name
+                )
+            written.append((value, name, tris, col, row))
+    finally:
+        # Always restore text and placement, even if an export failed partway.
+        sheet.set("text", original_text)
+        body.Placement = original_placement
+        doc.recompute()
+
+    rows = (count + cols - 1) // cols
+    direction = "descending" if step < 0 else "ascending"
+    print("Z-offset sweep: %d frames, %+.*f -> %+.*f, step %.*f (%s)"
+          % (count, decimals, start, decimals, end,
+             decimals, abs(step), direction))
+    print("grid: %d x %d at %.1f x %.1f mm pitch (footprint %.1f x %.1f mm)"
+          % (cols, rows, pitch_x, pitch_y,
+             cols * pitch_x - gap, rows * pitch_y - gap))
+    print("into %s" % out_dir)
+    for value, name, tris, col, row in written:
+        print("  %+.*f  r%dc%d  %-56s %6d tris"
+              % (decimals, value, row, col, name, tris))
+
+
+run()
